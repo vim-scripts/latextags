@@ -6,7 +6,7 @@
 # run this script without arguments to get usage help
 #
 #
-# Version 1.4, 14 May 2002
+# Version 1.5, 3 April 2003
 #
 # Written by Michael Muhler <muhler@web.de>.  
 # Suggestions for improvement are very welcome!
@@ -17,13 +17,49 @@
 # This script will not work with Perl 4 or below!
 #
 # Revision history:
-#  1.0  Apr 2002   Original version, quickly hacked together
-#  1.1  4/15/2002  added support for bibtex
-#  1.2  5/08/2002  added incl option, changed some variable names
-#  1.3  5/11/2002  work towards first official release
-#                  clean up of code, completed incl option
-#                  added verbose option
-#  1.4  5/14/2002  first official release 
+#  1.5  04/03/03  fixed multiple braces bug, fix by Manoj
+#  1.4  05/14/02  first official release 
+#  1.3  05/11/02  work towards first official release
+#                 clean up of code, completed incl option
+#                 added verbose option
+#  1.2  05/08/02  added incl option, changed some variable names
+#  1.1  04/15/02  added support for bibtex
+#  1.0  Apr 2002  original version, quickly hacked together
+
+
+# Vim Integration
+# Here are some thoughts on how to integrate this script
+# into Vim
+#
+# Define a variable for the script name:
+#    let g:MLMtagsProg = "latextags.pl *.tex"
+# 
+# Define a function, which uses the defined variable
+# "+-----------------------------------------------------+
+# "|  MakeTags                                           |
+# "+-----------------------------------------------------+
+# function! s:MLMMakeTags(...)
+#         " runs latextags.pl in current directory
+#         let ExeCmd= g:MLMtagsProg
+#         exe "!".ExeCmd
+# endfunction
+#
+# 
+# Define a mapping or a menu entry which
+# runs the script:
+#
+# amenu 40.410 &LaTeX.create\ tags\ file  :call <SID>MLMMakeTags() <CR><CR>
+#
+# If the tags file exits, tags can be searched for using the
+# following mappings.
+# Here <C-F4> shows the tag in a preview window
+#
+#
+#   noremap <F4> :exe "tselect /^".expand("<cword>")<CR>
+#   inoremap <F4> <Esc>:exe "tselect /^".expand("<cword>")<CR>
+#   noremap <C-F4> :exe "ptselect /^".expand("<cword>")<CR>
+#   inoremap <C-F4> <Esc>:exe "ptselect /^".expand("<cword>")<CR>
+# 
 
 # TODO
 # Here is a list of ideas 
@@ -50,6 +86,7 @@ my $do_incl = 1;    # --incl, --noincl    create tags for included files?
 my $do_exts = 0;    # --extensions, --noextensions
                     #                     include Exuberant Ctags extensions
 my $do_static = 1;  # make static tags, actually fixed, not an option
+my $do_stylefile = "";  # personal style file to create tags for
 my $be_verbose = 1; # no verbosity by default
 
 # Global variables
@@ -77,6 +114,7 @@ my $prevtag = "";       # variable to store the previous tag
 my $currtag = "";       # variable to store the current  tag
 my $prevfile = "";      # variable to store the previous file
 my $currfile = "";      # variable to store the current  file
+my $fullstylefile = ""; # full name of personal style file
 
 # Create a tag file line and push it on the list of found tags
 sub MakeTag($$$$$) {
@@ -133,7 +171,7 @@ sub LabelName($) {
 
     # Look for the argument to "label".  Return it if found, else return ""
     # possible label declarations: \label{ex:hello1}
-    if ($stmt =~ /\\label\{(\w+.*)\}/) {
+    if ($stmt =~ /\\label\{(\w+[^}]*)\}/) { # fix by Manoj
         my $lablname = $1;
         return $lablname;
     }
@@ -161,6 +199,17 @@ sub wantedtexfile {
     }
 } 
 
+# determine location of personal style file
+# file might be somewhere in TEXINPUTS
+# or just in the same directory as the parsed tex file
+sub wantedstylefile {
+    if (/$do_stylefile\z/s) {
+        print "located personal style file: $File::Find::name\n" if ($be_verbose > 2);
+        $fullstylefile = $File::Find::name;
+#        push (@inclfilesfull, $File::Find::name);
+    }
+} 
+#
 ###############################################################################
 #
 #               Start 
@@ -175,6 +224,7 @@ $status = GetOptions("labl!" => \$do_labl,
                      "cmds!" => \$do_cmds,
                      "incl!" => \$do_incl,
                      "verbose:i" => \$be_verbose,  # optional verbosity level
+                     "stylefile:s" => \$do_stylefile,  # optional style file to tag
                      "extensions!" => \$do_exts);
              
 # Usage if error in options or no arguments given
@@ -193,6 +243,7 @@ unless ($status && @ARGV) {
     print "    --incl (--noincl)  (don't) create tags for LaTeX filex included with\n";
     print "                       the \\include command. (Don not use \\input !)\n";
     print "    --verbose[=verbositylevel] specify verbosity level\n";  
+    print "    --stylefile=filename  create tags for personal style file\n";
     print "    --extensions (--noextensions)\n";
     print "                       (don't) include Exuberant Ctags/Vim style\n";
     print "                       extensions in tag file\n\n";
@@ -219,6 +270,30 @@ if ($do_incl) {
 # Loop through files on command line - 'glob' any wildcards, since Windows
 # doesn't do this for us
 @infiles = map { glob } @ARGV;
+
+# add personal style file if specified
+if ($do_stylefile) {
+        print "\n Looking for personal style file $do_stylefile\n";
+        $fndvalidfile = 0;
+        $ii = 0;
+        while (($fndvalidfile == 0) && ($ii < @TEXINPUTS)) {
+                $TEXDIR = $TEXINPUTS[$ii++];
+                find(\&wantedstylefile, $TEXDIR);
+                print "$fullstylefile !\n";        
+                
+                # strip leading ./
+                $fullstylefile =~ s/^\.\///;
+                # skip if we cannot open file
+                next unless ((-f $fullstylefile) && (-r $fullstylefile));
+                if ($fndvalidfile++ == 0) {
+                        # push this file onto stack, if file has not
+                        # been processed
+                        push (@infiles, $fullstylefile);
+                } else {
+                        print "Found another version of $do_stylefile at $fullstylefile\n";
+                }
+        }
+}
 
 foreach $file (@infiles) {
     # Skip if this is not a file we can open.  
@@ -257,7 +332,7 @@ foreach $file (@infiles) {
         }
 
         # This is a label declaration if the keyword label is encountered
-        elsif (($do_labl) && ($stmt =~/\\label\{\w+.*\}/)) {
+        elsif (($do_labl) && ($stmt =~/\\label\{\w+[^}]*\}/)) {
             print "Found label tag\n" if ($be_verbose > 1);
             
             # Make a tag for this label, Default: make static tags.
@@ -381,6 +456,7 @@ if ($do_bibs) {
                 }
         }
 }        
+
 
 # Do we have any tags?  If so, write them to the tags file
 if (@tags) {
