@@ -1,0 +1,9 @@
+This is a mirror of http://www.vim.org/scripts/script.php?script_id=297
+
+This is a perl script to generate tags
+for Latex files. The script generates
+tags for labels, newcommands and bibliography
+items. 
+This is script was derived from Michael Schaap's
+pltags.pl script.
+The format of the tags file is usable from VIM.
